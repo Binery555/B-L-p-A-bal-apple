@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="en" >
+<head>
+  <meta charset="UTF-8">
+  <title>Untitled</title>
+  
+
+</head>
+<body>
+<!-- partial:index.partial.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Binance Auto Pattern Detection (Channels, Triangles/Wedges) + RSI & Entry Arrows</title>
+<link href="https://db.onlinewebfonts.com/c/d05c19ccecf7003d248c60ffd6b5e8f7?family=Binance+PLEX" rel="stylesheet"/>
+<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.2.1/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+  :root{
+    --bg:#0b0e11; --panel:#141a1f; --grid:#222831; --text:#d1d4dc;
+    --up:#00c076; --dn:#ff554a; --accent:#f0b90b;
+    --lineU:#7aa2ff; --lineL:#ffa7a7; --lineT:#f39c12;
+    --muted:#9aa4af;
+  }
+  html,body{height:100%}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font:14px/1.4 "Binance PLEX", system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial, sans-serif;
+  }
+  header{
+    display:flex; align-items:center; gap:12px; padding:10px 14px; background:var(--panel);
+    position:sticky; top:0; z-index:5; border-bottom:1px solid #101418; flex-wrap:wrap;
+  }
+  header .dot{width:8px;height:8px;border-radius:50%}
+  .badge{
+    position:absolute; padding:4px 8px; border-radius:6px; font-weight:700; font-size:12px;
+    color:#0b0e11; background:var(--accent); box-shadow:0 6px 16px rgba(0,0,0,.35); pointer-events:none;
+    transform:translate(-50%,-100%); border:1px solid rgba(0,0,0,.35);
+    white-space:nowrap
+  }
+  .pill{
+    background:#0f1720; color:#c9d1d9; border:1px solid #213040; padding:6px 10px; border-radius:10px;
+  }
+  .row{display:flex; align-items:center; gap:8px; flex-wrap:wrap}
+  .spacer{flex:1}
+  select,input,button{background:#0f1720;color:#c9d1d9;border:1px solid #213040;border-radius:8px;padding:6px 10px;outline:none}
+  button{cursor:pointer}
+  a{color:var(--accent); text-decoration:none}
+  .slim{padding:4px 8px}
+  .muted{opacity:.85}
+  .w200{min-width:200px}
+  .w160{min-width:160px}
+  .w120{min-width:120px}
+
+  /* Layout: price pane (70%), RSI pane (30%) */
+  #stage{position:relative; height:calc(100vh - 96px); width:100%; display:flex; flex-direction:column;}
+  #pricePane{position:relative; height:70%; min-height:280px}
+  #rsiPane{position:relative; height:30%; min-height:140px; border-top:1px solid #0f1318}
+  .pane-title{
+    position:absolute; top:6px; left:10px; z-index:2; font-size:12px; color:var(--muted); background:rgba(0,0,0,.2); padding:2px 6px; border-radius:6px; border:1px solid rgba(255,255,255,.05)
+  }
+  .kbd{font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size:12px; padding:2px 6px; border:1px solid #213040; border-radius:6px; background:#0e141b; color:#c9d1d9}
+  .legend{position:absolute; right:10px; top:6px; font-size:12px; color:var(--muted)}
+</style>
+</head>
+<body>
+  <header>
+    <div class="dot" style="background:var(--accent)"></div>
+    <strong>Auto Pattern Detector</strong>
+
+    <!-- Symbol controls -->
+    <div class="row">
+      <label class="muted">Market</label>
+      <select id="quote" class="w120">
+        <option value="USDT" selected>USDT</option>
+        <option value="FDUSD">FDUSD</option>
+        <option value="BUSD">BUSD</option>
+        <option value="ALL">All</option>
+      </select>
+
+      <label class="muted">Symbol</label>
+      <select id="symbolSel" class="w200"></select>
+
+      <input id="symFilter" placeholder="Search (e.g., BTC, ETH, XRP…)" class="w200"/>
+      <button id="refreshList" class="slim">Reload Symbols</button>
+    </div>
+
+    <!-- Interval / pattern controls -->
+    <div class="row">
+      <label class="muted">Interval</label>
+      <select id="intv">
+        <option value="1m">1m</option><option value="5m">5m</option>
+        <option value="15m">15m</option><option value="1h" selected>1h</option>
+        <option value="4h">4h</option><option value="1d">1d</option>
+      </select>
+      <label class="muted"><input type="checkbox" id="histToggle" checked/> History Patterns</label>
+      <label class="muted">Max history</label>
+      <select id="histLimit" class="w120">
+        <option value="500" selected>500</option>
+        <option value="1000">1000</option>
+        <option value="1500">1500</option>
+      </select>
+      <button id="apply" class="pill">Apply</button>
+    </div>
+
+    <div class="spacer"></div>
+
+    <div class="row">
+      <span class="pill">Patterns: Channel ↑/↓, Contracting Triangle/Wedge</span>
+      <span class="pill">RSI crossover arrows <span class="kbd">30↑ = Long</span> / <span class="kbd">70↓ = Short</span></span>
+    </div>
+  </header>
+
+  <div id="stage">
+    <div id="pricePane">
+      <div class="pane-title">Price</div>
+      <div class="legend" id="priceLegend"></div>
+    </div>
+    <div id="rsiPane">
+      <div class="pane-title">RSI (14)</div>
+      <div class="legend" id="rsiLegend">30 / 70</div>
+    </div>
+  </div>
+
+<script>
+/* -------------------- Config -------------------- */
+const settings = {
+  symbol: 'BTCUSDT',
+  interval: '1h',
+  historyLimit: 500,
+  showHistory: true,
+  maxHistoryDetections: 6,   // limit badges/lines from past
+  windowLookback: 160,        // bars per scan window
+  windowStep: 40,             // step when scanning history
+  rsiLen: 14,
+};
+
+function getCSS(v){ return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
+
+/* -------------------- Charts -------------------- */
+const priceRoot = document.getElementById('pricePane');
+const rsiRoot   = document.getElementById('rsiPane');
+
+const priceChart = LightweightCharts.createChart(priceRoot, {
+  layout: { background: { color: getCSS('--bg') }, textColor: getCSS('--text') },
+  grid: { vertLines: { color: getCSS('--grid') }, horzLines: { color: getCSS('--grid') } },
+  rightPriceScale: { borderVisible:false },
+  timeScale: { borderVisible:false, timeVisible:true, secondsVisible:false }
+});
+const rsiChart = LightweightCharts.createChart(rsiRoot, {
+  layout: { background: { color: getCSS('--bg') }, textColor: getCSS('--text') },
+  grid: { vertLines: { color: getCSS('--grid') }, horzLines: { color: getCSS('--grid') } },
+  rightPriceScale: { borderVisible:false },
+  timeScale: { borderVisible:false, timeVisible:true, secondsVisible:false }
+});
+
+// series
+const candles = priceChart.addCandlestickSeries({
+  upColor:getCSS('--up'), downColor:getCSS('--dn'),
+  wickUpColor:getCSS('--up'), wickDownColor:getCSS('--dn'),
+  borderVisible:false,
+});
+const rsiSeries = rsiChart.addLineSeries({ color:'#7db3ff', lineWidth:2 });
+const rsi30 = rsiChart.addLineSeries({ color:'#8b949e', lineWidth:1, lineStyle: LightweightCharts.LineStyle.Dotted });
+const rsi70 = rsiChart.addLineSeries({ color:'#8b949e', lineWidth:1, lineStyle: LightweightCharts.LineStyle.Dotted });
+
+// keep panes synced
+let syncing=false;
+function syncVisibleRange(from, to){
+  if(syncing) return;
+  syncing = true;
+  const range = { from, to };
+  priceChart.timeScale().setVisibleRange(range);
+  rsiChart.timeScale().setVisibleRange(range);
+  syncing = false;
+}
+priceChart.timeScale().subscribeVisibleTimeRangeChange((range)=>{
+  if(range) syncVisibleRange(range.from, range.to);
+});
+rsiChart.timeScale().subscribeVisibleTimeRangeChange((range)=>{
+  if(range) syncVisibleRange(range.from, range.to);
+});
+
+let data = [];            // price bars
+let rsi = [];             // rsi values
+let socket = null;
+const patternObjs = [];   // pattern lines + badges to clear
+let priceMarkers = [];    // arrows on price
+let rsiMarkers = [];      // arrows on rsi
+
+/* -------------------- API helpers -------------------- */
+const api = {
+  klines: (symbol, interval, limit=500) =>
+    fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`).then(r=>r.json()),
+  exchangeInfo: () =>
+    fetch('https://api.binance.com/api/v3/exchangeInfo').then(r=>r.json()),
+};
+const wsUrl = (symbol, interval) => `wss://stream.binance.com:9443/ws/${symbol.toLowerCase()}@kline_${interval}`;
+function mapKline(arr){
+  return { time: Math.floor(arr[0]/1000), open:+arr[1], high:+arr[2], low:+arr[3], close:+arr[4] };
+}
+
+/* -------------------- Swings + regression (patterns) -------------------- */
+function getSwings(src, left=2, right=2){
+  const highs=[], lows=[];
+  for(let i=left;i<src.length-right;i++){
+    let isHigh=true, isLow=true;
+    for(let j=1;j<=left;j++){
+      if (src[i-j].high >= src[i].high) isHigh=false;
+      if (src[i-j].low  <= src[i].low ) isLow=false;
+    }
+    for(let j=1;j<=right;j++){
+      if (src[i+j].high > src[i].high) isHigh=false;
+      if (src[i+j].low  < src[i].low ) isLow=false;
+    }
+    if (isHigh) highs.push({ i, time: src[i].time, price: src[i].high });
+    if (isLow)  lows.push({ i, time: src[i].time, price: src[i].low  });
+  }
+  return { highs, lows };
+}
+function linReg(points){
+  const n=points.length;
+  if (n<2) return {m:0,b:points[0]?.price ?? 0};
+  const sx = points.reduce((a,p)=>a+p.i,0);
+  const sy = points.reduce((a,p)=>a+p.price,0);
+  const sxx= points.reduce((a,p)=>a+p.i*p.i,0);
+  const sxy= points.reduce((a,p)=>a+p.i*p.price,0);
+  const denom = n*sxx - sx*sx || 1e-9;
+  const m = (n*sxy - sx*sy)/denom;
+  const b = (sy - m*sx)/n;
+  return { m, b };
+}
+const vAt = (line, i)=> line.m*i + line.b;
+
+/* -------------------- Draw helpers (patterns) -------------------- */
+function clearPatterns(){
+  while(patternObjs.length){
+    const obj = patternObjs.pop();
+    if (obj.series) priceChart.removeSeries(obj.series);
+    if (obj.badge && obj.badge.remove) obj.badge.remove();
+  }
+}
+function drawLine(t0, v0, t1, v1, color){
+  const s = priceChart.addLineSeries({ color, lineWidth:2, priceScaleId:'right' });
+  s.setData([{time:t0, value:v0}, {time:t1, value:v1}]);
+  patternObjs.push({series:s});
+  return s;
+}
+function spawnBadge(time, price, text){
+  const el = document.createElement('div');
+  el.className = 'badge';
+  el.textContent = text;
+  priceRoot.appendChild(el);
+  function position(){
+    const x = priceChart.timeScale().timeToCoordinate(time);
+    const y = candles.priceScale('right').priceToCoordinate(price);
+    if (x!=null && y!=null){
+      el.style.left = x+'px';
+      el.style.top  = y+'px';
+      el.style.display='block';
+    } else el.style.display='none';
+  }
+  position();
+  priceChart.timeScale().subscribeVisibleTimeRangeChange(position);
+  priceChart.subscribeCrosshairMove(position);
+  window.addEventListener('resize', position);
+  patternObjs.push({badge:el});
+}
+function detectPatternOnSlice(src){
+  const { highs, lows } = getSwings(src, 2, 2);
+  if (highs.length < 5 || lows.length < 5) return null;
+
+  const N=8;
+  const H = highs.slice(-N);
+  const L = lows.slice(-N);
+  if (H.length<3 || L.length<3) return null;
+
+  const up = linReg(H);
+  const dn = linReg(L);
+  const startIdx = Math.min(H[0]?.i ?? 0, L[0]?.i ?? 0);
+  const endIdx   = src.length-1;
+  const widthStart = (vAt(up,startIdx) - vAt(dn,startIdx));
+  const widthEnd   = (vAt(up,endIdx)   - vAt(dn,endIdx));
+  if (!isFinite(widthStart) || !isFinite(widthEnd) || widthStart<=0) return null;
+
+  const widthNarrowing = widthEnd / widthStart < 0.72;
+  const angleUp = up.m, angleDn = dn.m;
+
+  let label = null, colorUpper=getCSS('--lineU'), colorLower=getCSS('--lineL'), colorBoth=null;
+  if (angleUp > 0 && angleDn > 0 && Math.abs(angleUp - angleDn) < Math.abs(angleUp)*0.65){
+    label = "Ascending Channel";
+  } else if (angleUp < 0 && angleDn < 0 && Math.abs(angleUp - angleDn) < Math.abs(angleUp)*0.65){
+    label = "Descending Channel";
+  } else if ((angleUp < 0 && angleDn > 0) || (angleUp > 0 && angleDn < 0)){
+    label = widthNarrowing ? "Contracting Triangle/Wedge" : "Broadening Structure";
+    colorBoth = getCSS('--lineT');
+  }
+  if (!label) return null;
+
+  return { label, startIdx, endIdx, up, dn, colorUpper, colorLower, colorBoth };
+}
+function drawDetectionOnSeries(slice){
+  const det = detectPatternOnSlice(slice);
+  if (!det) return false;
+  const {label,startIdx,endIdx,up,dn,colorUpper,colorLower,colorBoth} = det;
+
+  const t0 = slice[startIdx].time;
+  const t1 = slice[endIdx].time;
+
+  if (colorBoth){
+    drawLine(t0, vAt(up,startIdx), t1, vAt(up,endIdx), colorBoth);
+    drawLine(t0, vAt(dn,startIdx), t1, vAt(dn,endIdx), colorBoth);
+  } else {
+    drawLine(t0, vAt(up,startIdx), t1, vAt(up,endIdx), colorUpper);
+    drawLine(t0, vAt(dn,startIdx), t1, vAt(dn,endIdx), colorLower);
+  }
+
+  const midIdx = Math.floor((startIdx+endIdx)/2);
+  const midTime = slice[midIdx].time;
+  const midPrice = (vAt(up,midIdx)+vAt(dn,midIdx))/2;
+  spawnBadge(midTime, midPrice, label);
+  return true;
+}
+
+/* -------------------- RSI + Entry arrows -------------------- */
+function computeRSI(src, len=14){
+  if (!src || src.length < len+2) return [];
+  const out = [];
+  let gain=0, loss=0;
+  // seed
+  for(let i=1;i<=len;i++){
+    const ch = src[i].close - src[i-1].close;
+    gain += Math.max(ch,0);
+    loss += Math.max(-ch,0);
+  }
+  gain/=len; loss/=len;
+  let rs = loss===0 ? 100 : gain/loss;
+  out[len] = { time: src[len].time, value: 100 - (100/(1+rs)) };
+
+  for(let i=len+1;i<src.length;i++){
+    const ch = src[i].close - src[i-1].close;
+    const up = Math.max(ch,0);
+    const dn = Math.max(-ch,0);
+    // Wilder smoothing
+    gain = (gain*(len-1) + up)/len;
+    loss = (loss*(len-1) + dn)/len;
+    rs = loss===0 ? 100 : gain/(loss||1e-12);
+    out[i] = { time: src[i].time, value: 100 - (100/(1+rs)) };
+  }
+  // compact to contiguous array
+  return out.filter(Boolean);
+}
+
+function updateRSIAndMarkers(){
+  rsi = computeRSI(data, settings.rsiLen);
+  rsiSeries.setData(rsi);
+
+  // 30/70 guide lines spanning current data range
+  if (data.length){
+    const t0 = data[0].time, t1 = data[data.length-1].time;
+    rsi30.setData([{time:t0,value:30},{time:t1,value:30}]);
+    rsi70.setData([{time:t0,value:70},{time:t1,value:70}]);
+  }
+
+  // Build arrows from RSI cross logic:
+  // Long when RSI crosses up through 30; Short when RSI crosses down through 70.
+  priceMarkers = [];
+  rsiMarkers = [];
+  for (let i=1;i<rsi.length;i++){
+    const prev = rsi[i-1].value;
+    const cur  = rsi[i].value;
+    const t    = rsi[i].time;
+    const bar  = data.find(b=>b.time===t);
+    if (!bar) continue;
+
+    if (prev < 30 && cur >= 30){
+      // LONG arrow
+      priceMarkers.push({
+        time:t, position:'belowBar', color:getCSS('--up'),
+        shape:'arrowUp', text:`RSI 30↑ LONG`
+      });
+      rsiMarkers.push({
+        time:t, position:'belowBar', color:getCSS('--up'),
+        shape:'arrowUp', text:`30↑`
+      });
+    }
+    if (prev > 70 && cur <= 70){
+      // SHORT arrow
+      priceMarkers.push({
+        time:t, position:'aboveBar', color:getCSS('--dn'),
+        shape:'arrowDown', text:`RSI 70↓ SHORT`
+      });
+      rsiMarkers.push({
+        time:t, position:'aboveBar', color:getCSS('--dn'),
+        shape:'arrowDown', text:`70↓`
+      });
+    }
+  }
+  candles.setMarkers(priceMarkers);
+  rsiSeries.setMarkers(rsiMarkers);
+  document.getElementById('priceLegend').textContent = `${settings.symbol} · ${settings.interval}`;
+}
+
+/* -------------------- Analyze (patterns) -------------------- */
+let analyzeQueued=false;
+function analyze(){
+  if (analyzeQueued) return;
+  analyzeQueued = true;
+  requestAnimationFrame(()=>{
+    analyzeQueued=false;
+    clearPatterns();
+    const lookback = settings.windowLookback;
+    const src = data.slice(-lookback);
+    if (src.length < 60) return;
+
+    drawDetectionOnSeries(src);
+
+    if (settings.showHistory){
+      let count=0;
+      const step = settings.windowStep;
+      for (let end=data.length-lookback-step; end>lookback && count<settings.maxHistoryDetections; end-=step){
+        const slice = data.slice(end-lookback, end);
+        const ok = drawDetectionOnSeries(slice);
+        if (ok) count++;
+      }
+    }
+  });
+}
+
+/* -------------------- Load data & WS -------------------- */
+async function load(symbol, interval){
+  // close old WS
+  if (socket) try{ socket.close(); }catch(e){}
+  // fetch history
+  const raw = await api.klines(symbol, interval, settings.historyLimit);
+  if (!Array.isArray(raw) || raw.length===0){ console.warn('No kline data'); return; }
+  data = raw.map(mapKline);
+  candles.setData(data);
+  updateRSIAndMarkers();
+  analyze();
+
+  // visible range fit both panes
+  const range = { from: data[Math.max(0,data.length-200)].time, to: data[data.length-1].time };
+  priceChart.timeScale().setVisibleRange(range);
+  rsiChart.timeScale().setVisibleRange(range);
+
+  // subscribe live
+  socket = new WebSocket(wsUrl(symbol, interval));
+  socket.onmessage = (ev)=>{
+    const m = JSON.parse(ev.data);
+    if(!m.k) return;
+    const k = m.k;
+    const bar = { time: Math.floor(k.t/1000), open:+k.o, high:+k.h, low:+k.l, close:+k.c };
+    const last = data[data.length-1];
+    if (last && bar.time === last.time){
+      data[data.length-1] = bar;
+      candles.update(bar);
+    } else if (k.x) {
+      data.push(bar);
+      if (data.length > settings.historyLimit) data.shift();
+      candles.update(bar);
+    } else {
+      candles.update(bar);
+    }
+    if (data.length >= 20){
+      updateRSIAndMarkers();
+      analyze();
+    }
+  };
+  socket.onopen = ()=>console.log('WS connected');
+  socket.onclose = ()=>console.log('WS closed');
+}
+
+/* -------------------- Symbols list (Binance all markets) -------------------- */
+let allSymbols = []; // {symbol, baseAsset, quoteAsset, status}
+async function loadSymbols(){
+  try{
+    const info = await api.exchangeInfo();
+    const tradables = info.symbols.filter(s=>s.status==='TRADING');
+    allSymbols = tradables.map(s=>({symbol:s.symbol, base:s.baseAsset, quote:s.quoteAsset, status:s.status}));
+    populateSymbolSelect();
+  }catch(e){
+    console.error('exchangeInfo failed', e);
+  }
+}
+function populateSymbolSelect(){
+  const sel = document.getElementById('symbolSel');
+  const q = document.getElementById('quote').value;
+  const f = document.getElementById('symFilter').value.trim().toUpperCase();
+  sel.innerHTML = '';
+  let list = allSymbols.slice();
+  if (q !== 'ALL') list = list.filter(s=>s.quote===q);
+  if (f){
+    const parts = f.split(/\s+/).filter(Boolean);
+    list = list.filter(s=>{
+      const text = `${s.symbol} ${s.base} ${s.quote}`.toUpperCase();
+      return parts.every(p=>text.includes(p));
+    });
+  }
+  list.sort((a,b)=> (a.base < b.base ? -1 : a.base > b.base ? 1 : 0));
+  for (const s of list){
+    const opt = document.createElement('option');
+    opt.value = s.symbol;
+    opt.textContent = `${s.symbol}`;
+    if (s.symbol === settings.symbol) opt.selected = true;
+    sel.appendChild(opt);
+  }
+  if ([...sel.options].every(o=>o.value!==settings.symbol)){
+    const opt = document.createElement('option');
+    opt.value = settings.symbol;
+    opt.textContent = settings.symbol + ' (current)';
+    opt.selected = true;
+    sel.insertBefore(opt, sel.firstChild);
+  }
+}
+
+/* -------------------- UI wiring -------------------- */
+document.getElementById('apply').onclick = ()=>{
+  const sel = document.getElementById('symbolSel');
+  const newSym = sel.value || settings.symbol;
+  settings.symbol = newSym.toUpperCase();
+  settings.interval = document.getElementById('intv').value;
+  settings.historyLimit = +document.getElementById('histLimit').value;
+  settings.showHistory = document.getElementById('histToggle').checked;
+  load(settings.symbol, settings.interval);
+};
+document.getElementById('quote').onchange = populateSymbolSelect;
+document.getElementById('symFilter').oninput = ()=>{
+  clearTimeout(window._symFilterT);
+  window._symFilterT = setTimeout(populateSymbolSelect, 120);
+};
+document.getElementById('refreshList').onclick = loadSymbols;
+document.getElementById('histToggle').onchange = analyze;
+document.getElementById('histLimit').onchange = ()=>{
+  settings.historyLimit = +document.getElementById('histLimit').value;
+  load(settings.symbol, settings.interval);
+};
+document.getElementById('intv').onchange = ()=>{
+  settings.interval = document.getElementById('intv').value;
+  load(settings.symbol, settings.interval);
+};
+window.addEventListener('resize', ()=>{
+  priceChart.timeScale().fitContent();
+  rsiChart.timeScale().fitContent();
+});
+
+/* -------------------- Boot -------------------- */
+(async function(){
+  await loadSymbols();
+  const sel = document.getElementById('symbolSel');
+  if (sel) sel.value = settings.symbol;
+  await load(settings.symbol, settings.interval);
+})();
+</script>
+</body>
+</html>
+<!-- partial -->
+  
+</body>
+</html>
