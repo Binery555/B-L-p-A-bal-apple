@@ -251,15 +251,6 @@
     .pnl-card .username span:first-child { font-weight:600; font-size:13px; }
     .pnl-card .username span:last-child { font-size:11px; opacity:.9; }
 
-    /* >>> NEW: make only the day number smaller in the date below the name <<< */
-    .pnl-card .username .day-smaller{
-      font-size:0.85em;
-      display:inline-block;
-      transform: translateY(-0.2px);
-      letter-spacing:0;
-    }
-    /* ------------------------------------------------------- */
-
     .pnl-card .card-body { padding:0 16px 20px 16px; margin-bottom:1cm; }
     .pnl-card .title { font-size:16px; font-weight:700; text-transform:uppercase; }
     .pnl-card .position { margin:6px 0 8px; display:inline-flex; align-items:center; gap:10px; font-size:13px; font-weight:600; }
@@ -567,7 +558,7 @@
     const quantizeToTick = (price, tickSize) => { const step = parseFloat(tickSize); if (!isFinite(price) || !isFinite(step) || step <= 0) return price; return Math.round(price / step) * step; };
     const quantizeDownToStep = (qty, stepSize) => { const step = parseFloat(stepSize); if (!isFinite(qty) || !isFinite(step) || step <= 0) return qty; return Math.floor(qty / step) * step; };
     function joinIntDec(i, d) { const I = numberWithCommas(i); return d !== undefined ? I + '.' + d : I; }
-    function shuffle(arr){ for (let i = arr.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [arr[i], arr[j]] = [arr[j]]; } return arr; }
+    function shuffle(arr){ for (let i = arr.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [arr[i], arr[j]] = [arr[j], arr[i]]; } return arr; }
     const randInt = (min, max) => Math.floor(Math.random()*(max-min+1))+min;
 
     function formatProfit(_sym, x) {
@@ -791,7 +782,13 @@
     }
 
     const trades=[]; let symbols=shuffle(allSymbols.slice()); const tradeCount=60;
-    function shuffleFeed(){ const nodes=Array.from(feedDiv.children); nodes.filter(n=>n.id!=='emptyState').forEach(n=>feedDiv.appendChild(n)); }
+
+    // Shuffle feed nodes (true randomized order on each refresh)
+    function shuffleFeed(){
+      const nodes = Array.from(feedDiv.children).filter(n=>n.id!=='emptyState');
+      const shuffled = shuffle(nodes);
+      shuffled.forEach(n=> feedDiv.appendChild(n));
+    }
 
     async function seedWithFuturesMark6M(){
       const empty=document.getElementById("emptyState"); if(empty) empty.remove();
@@ -800,25 +797,29 @@
       const markMap=Object.create(null); arr.forEach(o=>{ if(o&&o.symbol) markMap[o.symbol]=parseFloat(o.markPrice); });
       const poolForEntry=Array.from(new Set([...primeSymbols, ...symbols.slice(0, tradeCount*2)]));
       const entryMap=await loadSixMonthEntryMap(poolForEntry);
-      const MARGIN_MIN=50, MARGIN_MAX=300;
+
+      // >>> UPDATED: Trade margin range 1–20 USDT
+      const MARGIN_MIN=1, MARGIN_MAX=20;
 
       const mainList=primeSymbols.filter(s=>marketMeta[s]&&isFinite(markMap[s])&&isFinite(entryMap[s]));
       const otherList=symbols.filter(s=>!primeSymbols.includes(s)&&marketMeta[s]&&isFinite(markMap[s])&&isFinite(entryMap[s]));
-      const planned=[...mainList, ...otherList].slice(0, tradeCount);
+      // Build, then shuffle planned list to ensure different card order each run
+      let planned=[...mainList, ...otherList].slice(0, tradeCount);
+      planned = shuffle(planned);
 
       const LEV_SET = [10,20,50,100];
 
+      // Create panels in randomized symbol order
       for(let i=0;i<planned.length;i++){
         const sym=planned[i];
         const liveMark=markMap[sym]; if(!isFinite(liveMark)) continue;
         const sixMEntryRaw=entryMap[sym]; if(!isFinite(sixMEntryRaw)) continue;
 
         const leverage = LEV_SET[Math.floor(Math.random()*LEV_SET.length)];
-
         const entry=quantizeToTick(sixMEntryRaw, getMeta(sym).tickSize);
-
         const side=(liveMark >= entry) ? 'LONG' : 'SHORT';
 
+        // Margin strictly between 1 and 20
         let usedMargin=(MARGIN_MIN + Math.random()*(MARGIN_MAX - MARGIN_MIN));
 
         const m=getMeta(sym);
@@ -826,15 +827,14 @@
         let qty=quantizeDownToStep(qtyRaw, m.stepSize);
         if(qty < m.minQty) qty = m.minQty;
 
-        // === NEW: Random margin mode (Cross or Isolated) ===
+        // Random Cross/Isolated effective margin logic
         const marginMode = Math.random() < 0.5 ? 'Cross' : 'Isolated';
-
-        // Effective margin: Cross uses wallet buffer; Isolated uses only its own used margin
         let effMargin;
         if (marginMode === 'Isolated') {
-          effMargin = usedMargin; // per-position margin only
+          effMargin = usedMargin;
         } else {
-          effMargin = usedMargin * (1.5 + Math.random() * 2.5); // wallet-style cushion
+          // wallet cushion for cross—kept modest so ratios stay realistic vs small margins
+          effMargin = usedMargin * (1.2 + Math.random() * 1.8);
         }
 
         const panelState = createPanel({
@@ -842,9 +842,13 @@
           usedMargin, effMargin, mmr: getMaintRate(sym), qty, side, marginMode
         });
 
-        trades.push(panelState); feedDiv.appendChild(panelState.node);
+        trades.push(panelState);
+        feedDiv.appendChild(panelState.node);
       }
-      shuffleFeed(); sizeFeed();
+
+      // Ensure DOM order is randomized regardless of generation sequence
+      shuffleFeed();
+      sizeFeed();
     }
 
     function recalcAccountTop(){
@@ -907,32 +911,17 @@
     let currentSharedTrade = null;
     const usernameStatic = 'Denuwanlakshitha';
 
-    /* >>> NEW: date HTML with smaller day number <<< */
-    function nowStampParts(){
+    function nowStamp(){
       const d=new Date();
       const pad=(n)=>String(n).padStart(2,'0');
-      return {
-        y: d.getFullYear(),
-        m: pad(d.getMonth()+1),
-        d: pad(d.getDate()),
-        hh: pad(d.getHours()),
-        mm: pad(d.getMinutes()),
-        ss: pad(d.getSeconds())
-      };
+      return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
     }
-    function nowStampHTML(){
-      const t = nowStampParts();
-      // Wrap only the day (DD)
-      return `${t.y}-${t.m}-<span class="day-smaller">${t.d}</span> ${t.hh}:${t.mm}:${t.ss}`;
-    }
-    /* ----------------------------------------------- */
 
     function openPNLModal(trade){
       setBottomInset();
       currentSharedTrade = trade;
       pnlEls.user.textContent = usernameStatic;
-      // use HTML so day can be smaller
-      pnlEls.time.innerHTML = nowStampHTML();
+      pnlEls.time.textContent = nowStamp();
       updatePNLCardFromTrade(trade);
       pnlEls.backdrop.classList.add('open');
       pnlEls.backdrop.setAttribute('aria-hidden','false');
@@ -983,7 +972,7 @@
           const dataURL = canvas.toDataURL('image/png');
           const a = document.createElement('a');
           a.href = dataURL;
-          a.download = `PNL_Card_${new Date().toISOString().replace(/[:]/g,'-')}.png`;
+          a.download = `PNL_Card_${nowStamp().replace(/[: ]/g,'_')}.png`;
           document.body.appendChild(a);
           a.click();
           a.remove();
@@ -1001,18 +990,23 @@
       await seedWithFuturesMark6M();
       forceTwoSmallLossesRandom();
 
+      // Unrealized after initial mark sync
       let initialUnreal = 0;
       for (const t of trades) {
         initialUnreal += (t.side === 'LONG') ? upnlLong(t.mark, t.entry, t.qty) : upnlShort(t.mark, t.entry, t.qty);
       }
       unrealizedSum = initialUnreal;
 
-      const BAL_MIN = 350000, BAL_MAX = 500000;
-      const marginBalanceTarget = Math.round(((BAL_MIN + Math.random()*(BAL_MAX - BAL_MIN)) + Number.EPSILON) * 100) / 100;
+      // >>> UPDATED: Main (Margin) Balance range $5,000 – $15,000
+      const BAL_MIN = 5000, BAL_MAX = 15000;
+      const marginBalanceTarget = Math.round((BAL_MIN + Math.random()*(BAL_MAX - BAL_MIN)) * 100) / 100;
 
+      // Wallet = Target - Unrealized (so Amount = Wallet + Unrealized == Target)
       walletBalance = marginBalanceTarget - unrealizedSum;
 
-      realizedTodayUSD = randInt(2500, 8500);
+      // Realized PNL today ≈ 1%–8% of wallet (keeps realistic vs balance)
+      const rp = Math.max(0.01, Math.random()*0.07 + 0.01);
+      realizedTodayUSD = Math.max(0, walletBalance * rp);
       realizedTodayPct = walletBalance > 0 ? (realizedTodayUSD / walletBalance) * 100 : 0;
 
       refreshTop();
