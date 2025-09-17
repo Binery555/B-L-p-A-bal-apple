@@ -251,6 +251,15 @@
     .pnl-card .username span:first-child { font-weight:600; font-size:13px; }
     .pnl-card .username span:last-child { font-size:11px; opacity:.9; }
 
+    /* >>> NEW: make only the day number smaller in the date below the name <<< */
+    .pnl-card .username .day-smaller{
+      font-size:0.85em;
+      display:inline-block;
+      transform: translateY(-0.2px);
+      letter-spacing:0;
+    }
+    /* ------------------------------------------------------- */
+
     .pnl-card .card-body { padding:0 16px 20px 16px; margin-bottom:1cm; }
     .pnl-card .title { font-size:16px; font-weight:700; text-transform:uppercase; }
     .pnl-card .position { margin:6px 0 8px; display:inline-flex; align-items:center; gap:10px; font-size:13px; font-weight:600; }
@@ -632,7 +641,7 @@
           if (Array.isArray(s.filters)) {
             for (const f of s.filters) {
               if (f.filterType === 'PRICE_FILTER' && f.tickSize) tickSize = f.tickSize;
-              if ((f.filterType === 'LOT_SIZE' || f.filterType === 'MARKET_Lot_SIZE' || f.filterType === 'MARKET_LOT_SIZE') && f.stepSize) stepSize = f.stepSize;
+              if ((f.filterType === 'LOT_SIZE' || f.filterType === 'MARKET_LOT_SIZE') && f.stepSize) stepSize = f.stepSize;
               if ((f.filterType === 'LOT_SIZE' || f.filterType === 'MARKET_LOT_SIZE') && f.minQty) minQty = parseFloat(f.minQty) || 0;
             }
           }
@@ -650,7 +659,6 @@
     const maintenanceMarginRates = { BTCUSDT:0.004, ETHUSDT:0.005, BNBUSDT:0.005, ADAUSDT:0.010, SOLUSDT:0.008, XRPUSDT:0.010, DOTUSDT:0.010, LTCUSDT:0.010, LINKUSDT:0.010, DOGEUSDT:0.012, AAVEUSDT:0.010, SUSHIUSDT:0.015, SHIBUSDT:0.020, COMPUSDT:0.010, ETCUSDT:0.010, ZECUSDT:0.015, XMRUSDT:0.020, LRCUSDT:0.020, QNTUSDT:0.015, CRVUSDT:0.020, UNIUSDT:0.010, BCHUSDT:0.010, XLMUSDT:0.015, ATOMUSDT:0.010, MATICUSDT:0.010, AVAXUSDT:0.010, TRXUSDT:0.020, EOSUSDT:0.015, NEARUSDT:0.020, FILUSDT:0.015, OPUSDT:0.015, ARBUSDT:0.020, APTUSDT:0.015, SUIUSDT:0.020, INJUSDT:0.015, RNDRUSDT:0.015, GALAUSDT:0.025, THETAUSDT:0.020, SANDUSDT:0.020, MANAUSDT:0.020, AXSUSDT:0.020, CFXUSDT:0.025, ICPUSDT:0.015, LDOUSDT:0.020, PEPEUSDT:0.030, FLOKIUSDT:0.030, WIFUSDT:0.030, ARKUSDT:0.020, IOTAUSDT:0.020, KASUSDT:0.025, PYTHUSDT:0.020, STRKUSDT:0.020, JUPUSDT:0.020, APEUSDT:0.020, BLURUSDT:0.020, SEIUSDT:0.020, TIAUSDT:0.020, TONUSDT:0.015, ONDOUSDT:0.020 };
     const getMaintRate = (sym) => maintenanceMarginRates[sym] ?? 0.01;
 
-    // Core formulas (Binance-style)
     const qtyFrom = (marginUsed, leverage, entry) => (leverage * marginUsed) / entry;
     const upnlLong  = (mark, entry, qty) => (mark - entry) * qty;
     const upnlShort = (mark, entry, qty) => (entry - mark) * qty;
@@ -782,7 +790,7 @@
       return entryMap;
     }
 
-    const trades=[]; let symbols=shuffle(allSymbols.slice()); const tradeCount=20; // Enforce +20 trades
+    const trades=[]; let symbols=shuffle(allSymbols.slice()); const tradeCount=60;
     function shuffleFeed(){ const nodes=Array.from(feedDiv.children); nodes.filter(n=>n.id!=='emptyState').forEach(n=>feedDiv.appendChild(n)); }
 
     async function seedWithFuturesMark6M(){
@@ -792,9 +800,7 @@
       const markMap=Object.create(null); arr.forEach(o=>{ if(o&&o.symbol) markMap[o.symbol]=parseFloat(o.markPrice); });
       const poolForEntry=Array.from(new Set([...primeSymbols, ...symbols.slice(0, tradeCount*2)]));
       const entryMap=await loadSixMonthEntryMap(poolForEntry);
-
-      // === Enforce per-trade margin between $1 and $20 ===
-      const MARGIN_MIN=1, MARGIN_MAX=20;
+      const MARGIN_MIN=50, MARGIN_MAX=300;
 
       const mainList=primeSymbols.filter(s=>marketMeta[s]&&isFinite(markMap[s])&&isFinite(entryMap[s]));
       const otherList=symbols.filter(s=>!primeSymbols.includes(s)&&marketMeta[s]&&isFinite(markMap[s])&&isFinite(entryMap[s]));
@@ -808,25 +814,27 @@
         const sixMEntryRaw=entryMap[sym]; if(!isFinite(sixMEntryRaw)) continue;
 
         const leverage = LEV_SET[Math.floor(Math.random()*LEV_SET.length)];
+
         const entry=quantizeToTick(sixMEntryRaw, getMeta(sym).tickSize);
+
         const side=(liveMark >= entry) ? 'LONG' : 'SHORT';
 
-        let usedMargin=(MARGIN_MIN + Math.random()*(MARGIN_MAX - MARGIN_MIN)); // 1..20
+        let usedMargin=(MARGIN_MIN + Math.random()*(MARGIN_MAX - MARGIN_MIN));
 
         const m=getMeta(sym);
         let qtyRaw=qtyFrom(usedMargin, leverage, entry);
         let qty=quantizeDownToStep(qtyRaw, m.stepSize);
         if(qty < m.minQty) qty = m.minQty;
 
-        // Random margin mode (Cross or Isolated)
+        // === NEW: Random margin mode (Cross or Isolated) ===
         const marginMode = Math.random() < 0.5 ? 'Cross' : 'Isolated';
 
         // Effective margin: Cross uses wallet buffer; Isolated uses only its own used margin
         let effMargin;
         if (marginMode === 'Isolated') {
-          effMargin = usedMargin;
+          effMargin = usedMargin; // per-position margin only
         } else {
-          effMargin = usedMargin * (1.5 + Math.random() * 2.5);
+          effMargin = usedMargin * (1.5 + Math.random() * 2.5); // wallet-style cushion
         }
 
         const panelState = createPanel({
@@ -899,17 +907,32 @@
     let currentSharedTrade = null;
     const usernameStatic = 'Denuwanlakshitha';
 
-    function nowStamp(){
+    /* >>> NEW: date HTML with smaller day number <<< */
+    function nowStampParts(){
       const d=new Date();
       const pad=(n)=>String(n).padStart(2,'0');
-      return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+      return {
+        y: d.getFullYear(),
+        m: pad(d.getMonth()+1),
+        d: pad(d.getDate()),
+        hh: pad(d.getHours()),
+        mm: pad(d.getMinutes()),
+        ss: pad(d.getSeconds())
+      };
     }
+    function nowStampHTML(){
+      const t = nowStampParts();
+      // Wrap only the day (DD)
+      return `${t.y}-${t.m}-<span class="day-smaller">${t.d}</span> ${t.hh}:${t.mm}:${t.ss}`;
+    }
+    /* ----------------------------------------------- */
 
     function openPNLModal(trade){
       setBottomInset();
       currentSharedTrade = trade;
       pnlEls.user.textContent = usernameStatic;
-      pnlEls.time.textContent = nowStamp();
+      // use HTML so day can be smaller
+      pnlEls.time.innerHTML = nowStampHTML();
       updatePNLCardFromTrade(trade);
       pnlEls.backdrop.classList.add('open');
       pnlEls.backdrop.setAttribute('aria-hidden','false');
@@ -960,7 +983,7 @@
           const dataURL = canvas.toDataURL('image/png');
           const a = document.createElement('a');
           a.href = dataURL;
-          a.download = `PNL_Card_${nowStamp().replace(/[: ]/g,'_')}.png`;
+          a.download = `PNL_Card_${new Date().toISOString().replace(/[:]/g,'-')}.png`;
           document.body.appendChild(a);
           a.click();
           a.remove();
@@ -978,26 +1001,18 @@
       await seedWithFuturesMark6M();
       forceTwoSmallLossesRandom();
 
-      // Compute unrealized PNL from seeded trades
       let initialUnreal = 0;
       for (const t of trades) {
         initialUnreal += (t.side === 'LONG') ? upnlLong(t.mark, t.entry, t.qty) : upnlShort(t.mark, t.entry, t.qty);
       }
       unrealizedSum = initialUnreal;
 
-      // === Enforce Margin Balance between $5,000 and $15,000 ===
-      const BAL_MIN = 5000, BAL_MAX = 15000;
+      const BAL_MIN = 350000, BAL_MAX = 500000;
       const marginBalanceTarget = Math.round(((BAL_MIN + Math.random()*(BAL_MAX - BAL_MIN)) + Number.EPSILON) * 100) / 100;
 
-      // Wallet balance chosen such that Margin Balance = wallet + unrealized
       walletBalance = marginBalanceTarget - unrealizedSum;
 
-      // Keep wallet balance within sensible bounds (in case unrealized > target)
-      if (walletBalance < 1000) walletBalance = 1000;
-      if (walletBalance > 20000) walletBalance = 20000;
-
-      // Realized PNL for today scaled to wallet size (about 0.3%..1.5%)
-      realizedTodayUSD = Math.round(walletBalance * (0.003 + Math.random()*0.012));
+      realizedTodayUSD = randInt(2500, 8500);
       realizedTodayPct = walletBalance > 0 ? (realizedTodayUSD / walletBalance) * 100 : 0;
 
       refreshTop();
